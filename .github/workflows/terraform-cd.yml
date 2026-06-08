@@ -18,12 +18,11 @@ permissions:
 
 jobs:
   # Job 1/5 — Quick formatting check that runs in seconds, no init required.
-  # Reports as its own status check on the PR.
+  # Reports as its own status check on the PR, and also runs on push to main
+  # so apply-dev can `needs:` it (a skipped `needs` would skip apply-dev too).
   terraform-fmt:
     name: terraform-fmt
     runs-on: ubuntu-latest
-    # Only meaningful for PRs; skipped on push to main.
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -40,10 +39,10 @@ jobs:
 
   # Job 2/5 — Syntactic + internal consistency check.
   # Uses -backend=false so it needs zero AWS credentials.
+  # Runs on both PRs and pushes to main so apply-dev can depend on it.
   terraform-validate:
     name: terraform-validate
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra

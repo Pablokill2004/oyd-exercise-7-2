@@ -1,0 +1,97 @@
+El problema real
+
+En tu workflow tienes:
+
+terraform-fmt:
+  if: github.event_name == 'pull_request'
+
+terraform-validate:
+  if: github.event_name == 'pull_request'
+
+y luego:
+
+apply-dev:
+  needs: [terraform-fmt, terraform-validate, terraform-plan]
+  if: github.event_name == 'push'
+
+Cuando haces Merge Pull Request ocurre un evento:
+
+github.event_name == 'push'
+
+Por lo tanto:
+
+terraform-fmt
+terraform-validate
+
+se marcan como:
+
+This job was skipped
+
+porque explícitamente les dijiste que sólo corran en PR.
+
+Luego apply-dev depende de ellos:
+
+needs:
+  - terraform-fmt
+  - terraform-validate
+  - terraform-plan
+
+y GitHub puede considerar que la dependencia no fue ejecutada exitosamente sino omitida.
+
+Lo que pide realmente el ejercicio
+
+El enunciado dice:
+
+Add two apply jobs that run only on push to main
+
+pero también dice:
+
+apply-dev: needs all three validation jobs
+
+Eso implica que los tres jobs:
+
+terraform-fmt
+terraform-validate
+terraform-plan
+
+deben ejecutarse también en el workflow disparado por:
+
+push:
+  branches: [main]
+
+No únicamente en PR.
+
+Otro problema que veo
+
+Tienes:
+
+terraform-plan:
+
+sin condición.
+
+Eso significa:
+
+En PR
+
+Corre.
+
+En Push
+
+Corre.
+
+Correcto.
+
+Pero:
+
+terraform-fmt
+terraform-validate
+
+no corren en Push.
+
+Por eso tu ejecución de merge probablemente se ve así:
+
+terraform-fmt       skipped
+terraform-validate  skipped
+terraform-plan      success
+apply-dev           skipped
+apply-staging       skipped
