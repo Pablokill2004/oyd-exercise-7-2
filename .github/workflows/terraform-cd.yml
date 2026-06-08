@@ -23,7 +23,6 @@ jobs:
   terraform-fmt:
     name: terraform-fmt
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -44,7 +43,6 @@ jobs:
   terraform-validate:
     name: terraform-validate
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -69,7 +67,6 @@ jobs:
   terraform-plan:
     name: terraform-plan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     # Runs on both PRs and pushes so the apply jobs (push only) get the artifact.
     defaults:
       run:
