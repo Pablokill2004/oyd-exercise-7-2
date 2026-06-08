@@ -1,0 +1,28 @@
+# Terraform files
+*.tfstate
+*.tfstate.backup
+.terraform
+.terraform/**
+
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# TFplan artifact
+infra/tfplan
+
+# App
+/app/server
+/app/*.zip
+/app/bootstrap
+
+# Git keep
+!.gitkeep
+# Local summary of the exercise — not pushed to the remote repo.
+# Keep this file untracked so it stays a private cheat-sheet.
+ejercicio-resumen.md
+
+

@@ -1,0 +1,205 @@
+# Workflow: Terraform CD
+# Purpose: lint/validate/plan Terraform on every PR with separate status checks,
+ 
+
+name: Terraform CD
+
+# Triggers: PRs validate the change, pushes to main apply it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Required so the workflow can post PR comments and create deployment statuses.
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  # Job 1/5 — Quick formatting check that runs in seconds, no init required.
+  # Reports as its own status check on the PR.
+  terraform-fmt:
+    name: terraform-fmt
+    runs-on: ubuntu-latest
+    # Only meaningful for PRs; skipped on push to main.
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Fails if any .tf file is not canonically formatted.
+      - name: Check formatting
+        run: terraform fmt -check
+
+  # Job 2/5 — Syntactic + internal consistency check.
+  # Uses -backend=false so it needs zero AWS credentials.
+  terraform-validate:
+    name: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Local-only init: downloads providers but skips backend config.
+      - name: Init without backend
+        run: terraform init -backend=false
+
+      # Validates references, types, and required arguments.
+      - name: Validate configuration
+        run: terraform validate
+
+  # Job 3/5 — Full plan against the dev backend.
+  # Produces the binary tfplan + readable plan.txt, uploads them as an
+  # artifact consumed later by the apply jobs, and posts the plan on the PR.
+  terraform-plan:
+    name: terraform-plan
+    runs-on: ubuntu-latest
+    # Runs on both PRs and pushes so the apply jobs (push only) get the artifact.
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Full init with the real dev backend (needs AWS creds).
+      - name: Init with dev backend
+        run: terraform init -backend-config=envs/dev/backend-dev.hcl
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
+
+      # Save the plan binary so apply can reuse it (no re-plan, no drift).
+      - name: Generate plan file
+        run: terraform plan -var-file=envs/dev/dev.tfvars -out=tfplan
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
+
+      # Convert the binary plan into human-readable text for the PR comment.
+      - name: Save plan as readable text
+        run: terraform show -no-color tfplan > plan.txt
+
+      # Ship both the binary plan and the text plan for downstream apply jobs.
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: |
+            infra/tfplan
+            infra/plan.txt
+          if-no-files-found: error
+
+      # Only the PR event gets the comment; on push the run is for apply.
+      - name: Post plan comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '### Terraform Plan — dev\n```\n' + plan + '\n```'
+            });
+
+  # Job 4/5 — Apply the PR-approved plan to the dev environment.
+  # Runs on push to main only; the dev environment has no protection rules.
+  apply-dev:
+    name: apply-dev
+    runs-on: ubuntu-latest
+    # Waits for all three validation jobs. Skipped jobs count as successful,
+    # so this still triggers on push even when fmt/validate are gated to PRs.
+    needs: [terraform-fmt, terraform-validate, terraform-plan]
+    if: github.event_name == 'push'
+    environment: dev
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Pull the same artifact the plan job uploaded (no fresh plan here).
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+
+      - name: Init with dev backend
+        run: terraform init -backend-config=envs/dev/backend-dev.hcl
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
+
+      # Apply the exact plan the reviewer approved on the PR.
+      - name: Apply dev plan
+        run: terraform apply tfplan
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
+
+  # Job 5/5 — Promote to staging.
+  # environment: staging is what makes GitHub pause for a required reviewer.
+  apply-staging:
+    name: apply-staging
+    runs-on: ubuntu-latest
+    needs: apply-dev
+    if: github.event_name == 'push'
+    environment: staging
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Reuse the same plan artifact; staging uses its own backend + tfvars.
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+
+      - name: Init with staging backend
+        run: terraform init -backend-config=envs/staging/backend-staging.hcl
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
+
+      # Fresh plan against staging tfvars so staging has its own diff to apply.
+      - name: Apply staging
+        run: terraform apply -var-file=envs/staging/staging.tfvars
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ secrets.AWS_REGION }}
