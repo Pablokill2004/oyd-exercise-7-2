@@ -23,6 +23,7 @@ jobs:
   terraform-fmt:
     name: terraform-fmt
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -43,6 +44,7 @@ jobs:
   terraform-validate:
     name: terraform-validate
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -67,6 +69,7 @@ jobs:
   terraform-plan:
     name: terraform-plan
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     # Runs on both PRs and pushes so the apply jobs (push only) get the artifact.
     defaults:
       run:
@@ -148,6 +151,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan-dev
+          path: infra
 
       - name: Init with dev backend
         run: terraform init -backend-config=envs/dev/backend-dev.hcl
@@ -187,6 +191,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan-dev
+          path: infra
 
       - name: Init with staging backend
         run: terraform init -backend-config=envs/staging/backend-staging.hcl
@@ -197,7 +202,7 @@ jobs:
 
       # Fresh plan against staging tfvars so staging has its own diff to apply.
       - name: Apply staging
-        run: terraform apply -var-file=envs/staging/staging.tfvars
+        run: terraform apply -auto-approve -var-file=envs/staging/staging.tfvars
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
