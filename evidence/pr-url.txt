@@ -1,7 +1,1 @@
-# Evidence — PR URL for Exercise 7.2
-# Paste here the GitHub PR URL where the three individual status checks
-# (terraform-fmt, terraform-validate, terraform-plan) and the plan comment
-# posted by actions/github-script are visible.
-#
-# Example format:
-# https://github.com/<owner>/oyd-exercise-7-2/pull/1
+https://github.com/Pablokill2004/oyd-exercise-7-2/pull/3
