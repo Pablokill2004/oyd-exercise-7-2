@@ -18,12 +18,10 @@ permissions:
 
 jobs:
   # Job 1/5 — Quick formatting check that runs in seconds, no init required.
-  # Reports as its own status check on the PR, and also runs on push to main
-  # so apply-dev can `needs:` it (a skipped `needs` would skip apply-dev too).
+  # Runs on both PR and push so apply jobs never see a skipped dependency.
   terraform-fmt:
     name: terraform-fmt
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -40,11 +38,10 @@ jobs:
 
   # Job 2/5 — Syntactic + internal consistency check.
   # Uses -backend=false so it needs zero AWS credentials.
-  # Runs on both PRs and pushes to main so apply-dev can depend on it.
+  # Runs on both PR and push so apply jobs never see a skipped dependency.
   terraform-validate:
     name: terraform-validate
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     defaults:
       run:
         working-directory: infra
@@ -69,7 +66,6 @@ jobs:
   terraform-plan:
     name: terraform-plan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     # Runs on both PRs and pushes so the apply jobs (push only) get the artifact.
     defaults:
       run:
@@ -131,8 +127,7 @@ jobs:
   apply-dev:
     name: apply-dev
     runs-on: ubuntu-latest
-    # Waits for all three validation jobs. Skipped jobs count as successful,
-    # so this still triggers on push even when fmt/validate are gated to PRs.
+    # Waits for all three validation jobs (all run on push, so no skipped deps).
     needs: [terraform-fmt, terraform-validate, terraform-plan]
     if: github.event_name == 'push'
     environment: dev
@@ -153,6 +148,7 @@ jobs:
           name: tfplan-dev
           path: infra
 
+
       - name: Init with dev backend
         run: terraform init -backend-config=envs/dev/backend-dev.hcl
         env:
@@ -160,9 +156,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION:            ${{ secrets.AWS_REGION }}
 
-      # Apply directly since plan is not available on push
-      - name: Apply dev
-        run: terraform apply -auto-approve -var-file=envs/dev/dev.tfvars
+      # Apply the exact plan the reviewer approved on the PR.
+      - name: Apply dev plan
+        run: terraform apply tfplan
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -192,6 +188,7 @@ jobs:
         with:
           name: tfplan-dev
           path: infra
+
 
       - name: Init with staging backend
         run: terraform init -backend-config=envs/staging/backend-staging.hcl
