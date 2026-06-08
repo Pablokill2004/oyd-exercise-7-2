@@ -3,7 +3,7 @@ variable "aws_region" {
   type        = string
   default     = "us-east-1"
 }
-
+## Variables for SQS queue
 variable "queue_name" {
   description = "Name of the SQS queue"
   type        = string
